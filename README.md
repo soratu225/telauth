@@ -121,7 +121,7 @@ curl -X DELETE http://localhost:8000/api/v1/phones/09012341234 \
 ffmpeg -i input.mp3 -ar 8000 -ac 1 -acodec pcm_s16le asterisk/sounds/ivr_menu.wav
 ```
 
-音声・ダイヤルプランは Asterisk イメージに焼き込まれるため、変更後は `docker compose build asterisk` が必要です。
+音声・ダイヤルプランは Asterisk イメージに焼き込まれ、起動時に entrypoint.sh がボリュームへ展開します。変更後は `docker compose build asterisk && docker compose up -d --force-recreate asterisk` で反映してください。
 
 ## 読み上げ音声の内容
 

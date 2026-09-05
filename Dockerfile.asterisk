@@ -1,18 +1,19 @@
 FROM andrius/asterisk:latest
 
-# テンプレートとスクリプトをコピー
-COPY asterisk/pjsip.conf.template /etc/asterisk/pjsip.conf.template
-COPY asterisk/manager.conf.template /etc/asterisk/manager.conf.template
-COPY asterisk/extensions.conf /etc/asterisk/extensions.conf
-COPY asterisk/musiconhold.conf /etc/asterisk/musiconhold.conf
-COPY asterisk/rtp.conf /etc/asterisk/rtp.conf
-COPY asterisk/entrypoint.sh /entrypoint.sh
+# ベースイメージは /etc/asterisk と /var/lib/asterisk/sounds を匿名ボリュームにしているため、
+# イメージ内に直接置いても再起動時に古いボリューム内容で上書きされてしまう。
+# そのため /opt/telauth に置き、entrypoint.sh が起動時に正しい場所へコピーする。
+COPY asterisk/pjsip.conf.template \
+     asterisk/manager.conf.template \
+     asterisk/extensions.conf \
+     asterisk/musiconhold.conf \
+     asterisk/rtp.conf \
+     /opt/telauth/etc/
 
 # IVR用音声ファイル (メニュー / 混雑案内 / 保留音)
-# ./sounds は telauth/ にマウントされるため、衝突しない ivr/ に置く
-COPY asterisk/sounds/ /var/lib/asterisk/sounds/ivr/
+COPY asterisk/sounds/ /opt/telauth/sounds/
 
+COPY asterisk/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
-RUN chown -R asterisk:asterisk /etc/asterisk /var/lib/asterisk/sounds/ivr
 
 ENTRYPOINT ["/entrypoint.sh"]
