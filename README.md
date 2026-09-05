@@ -112,6 +112,7 @@ curl -X DELETE http://localhost:8000/api/v1/phones/09012341234 \
 | `2` `3` `9` | 混雑案内 `asterisk/sounds/queue_notice.wav` を再生後、保留音を流し続ける（オペレーター接続は未実装） |
 | `#` | メニューをもう一度再生 |
 | 無入力 / 無効入力 | メニューを再生し直す（3回で切断） |
+| 非通知着信 | メニューの前に `asterisk/sounds/no_callerid.wav`（発信者番号を通知してかけ直すよう案内）を再生して切断 |
 
 保留音は `asterisk/sounds/moh/` 内の wav をループ再生します。同梱の `scarlatti_k145.wav` はドメニコ・スカルラッティ「ソナタ ニ長調 K.145」の弦楽合奏版です。
 
