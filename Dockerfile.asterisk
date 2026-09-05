@@ -8,6 +8,7 @@ COPY asterisk/pjsip.conf.template \
      asterisk/extensions.conf \
      asterisk/musiconhold.conf \
      asterisk/rtp.conf \
+     asterisk/logger.conf \
      /opt/telauth/etc/
 
 # IVR用音声ファイル (メニュー / 混雑案内 / 保留音)

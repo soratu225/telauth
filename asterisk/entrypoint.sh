@@ -9,6 +9,7 @@ IVR_SOUNDS=/var/lib/asterisk/sounds/ivr
 cp "$SRC/extensions.conf"  "$ETC/extensions.conf"
 cp "$SRC/musiconhold.conf" "$ETC/musiconhold.conf"
 cp "$SRC/rtp.conf"         "$ETC/rtp.conf"
+cp "$SRC/logger.conf"      "$ETC/logger.conf"
 
 # テンプレートから設定ファイルを作成
 cp "$SRC/pjsip.conf.template"   "$ETC/pjsip.conf"
