@@ -1,0 +1,43 @@
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs and databases
+*.log
+*.sqlite3
+telauth.db
+data/
+
+# Asterisk sound files (downloaded / cached)
+sounds/
+*.wav
+*.mp3
+
+# Scratch & diagnostic scripts
+diag*.py
+test_*.py
+clear_cache.py
+cf_login.py
+cf_setup.py
+run_cf.py
+hotdeploy_tts.py
+verify_wav.py
+check_db_schema.py
+
+# Docker overrides
+docker-compose.override.yml
