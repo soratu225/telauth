@@ -200,14 +200,24 @@ async def handle_inbound(phone_number: str, db: AsyncSession = Depends(get_db)):
 )
 async def call_complete(
     phone_number: str,
-    duration: int = 0,
+    duration: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """
     Asteriskのダイヤルプランから通話終了時に呼び出される。
     最新の着信ログに通話秒数を記録する。
+
+    duration はダイヤルプランの変数展開で空文字になることがあるため、
+    int で受けず自前でパースする（空/不正値は 0 秒扱い）。
     """
     from sqlalchemy import desc
+
+    try:
+        duration_sec = max(0, int(float(duration))) if duration else 0
+    except (TypeError, ValueError):
+        logger.warning(f"通話秒数を解釈できません: {duration!r} ({phone_number})")
+        duration_sec = 0
+
     result = await db.execute(
         select(CallLog)
         .where(CallLog.phone_number == phone_number)
@@ -217,10 +227,10 @@ async def call_complete(
     )
     log_entry = result.scalar_one_or_none()
     if log_entry:
-        log_entry.duration_seconds = duration
+        log_entry.duration_seconds = duration_sec
         log_entry.status = "completed"
         await db.commit()
-        logger.info(f"通話完了ログ更新: {phone_number} duration={duration}s")
+        logger.info(f"通話完了ログ更新: {phone_number} duration={duration_sec}s")
 
     return {"status": "ok"}
 

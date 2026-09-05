@@ -30,7 +30,7 @@ sounds/
 
 # Scratch & diagnostic scripts
 diag*.py
-test_*.py
+/test_*.py
 clear_cache.py
 cf_login.py
 cf_setup.py

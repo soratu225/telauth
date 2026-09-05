@@ -4,6 +4,7 @@ app/config.py - 環境変数設定管理（Asterisk/SIP対応版）
 import logging
 from functools import lru_cache
 from cryptography.fernet import Fernet
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,12 @@ class Settings(BaseSettings):
 
     # サービス設定
     service_name: str = "アピレンティック電話認証サービス"
-    api_keys_str: str = "changeme"  # カンマ区切りで複数指定可能
+    # 環境変数 API_KEY (README / .env.example で案内している名前) から読む。
+    # カンマ区切りで複数指定可能。API_KEYS / API_KEYS_STR も後方互換で受け付ける。
+    api_keys_str: str = Field(
+        default="changeme",
+        validation_alias=AliasChoices("API_KEY", "API_KEYS", "API_KEYS_STR"),
+    )
     secret_encryption_key: str = ""
 
     @property
