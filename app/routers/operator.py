@@ -186,11 +186,10 @@ async def handle_inbound(phone_number: str, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(log_entry)
 
-    from app.tts import generate_tts_wav
-    filename_base = f"otp_{phone_number}"
-    generate_tts_wav(otp_code, filename_base=filename_base)
+    from app.tts import generate_otp_prompts
+    files = generate_otp_prompts(otp_code, filename_base=f"otp_{phone_number}")
 
-    return {"status": "ok", "file": f"telauth/{filename_base}", "log_id": log_entry.id}
+    return {"status": "ok", "files": files, "log_id": log_entry.id}
 
 
 @router.get(
