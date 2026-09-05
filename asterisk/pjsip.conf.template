@@ -23,6 +23,8 @@ default_outbound_endpoint=brastel-endpoint
 [anonymous]
 type=endpoint
 context=from-brastel
+; RFC4733(RFC2833)がSDPで合意できればそれを使い、無ければ音声内(inband)のDTMFを検出する
+dtmf_mode=auto
 disallow=all
 allow=ulaw
 allow=alaw
@@ -30,6 +32,7 @@ allow=alaw
 [brastel-endpoint]
 type=endpoint
 transport=transport-udp
+dtmf_mode=auto
 aors=brastel-aor
 outbound_auth=brastel-auth
 context=from-brastel
