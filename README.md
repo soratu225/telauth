@@ -102,6 +102,27 @@ curl -X DELETE http://localhost:8000/api/v1/phones/09012341234 \
 
 ---
 
+## 着信IVRメニュー
+
+着信すると `asterisk/sounds/ivr_menu.wav` のメニューが流れ、押されたキーで分岐します。
+
+| キー | 動作 |
+|------|------|
+| `1` | 電話認証（OTP読み上げ） |
+| `2` `3` `9` | 混雑案内 `asterisk/sounds/queue_notice.wav` を再生後、保留音を流し続ける（オペレーター接続は未実装） |
+| `#` | メニューをもう一度再生 |
+| 無入力 / 無効入力 | メニューを再生し直す（3回で切断） |
+
+保留音は `asterisk/sounds/moh/` 内の wav をループ再生します。同梱の `hold_placeholder.wav` は仮の合成音なので、正式な保留音（8kHz / mono / 16bit wav）に差し替えてください。
+
+音声ファイルの変換例:
+
+```bash
+ffmpeg -i input.mp3 -ar 8000 -ac 1 -acodec pcm_s16le asterisk/sounds/ivr_menu.wav
+```
+
+音声・ダイヤルプランは Asterisk イメージに焼き込まれるため、変更後は `docker compose build asterisk` が必要です。
+
 ## 読み上げ音声の内容
 
 ```

@@ -4,10 +4,15 @@ FROM andrius/asterisk:latest
 COPY asterisk/pjsip.conf.template /etc/asterisk/pjsip.conf.template
 COPY asterisk/manager.conf.template /etc/asterisk/manager.conf.template
 COPY asterisk/extensions.conf /etc/asterisk/extensions.conf
+COPY asterisk/musiconhold.conf /etc/asterisk/musiconhold.conf
 COPY asterisk/rtp.conf /etc/asterisk/rtp.conf
 COPY asterisk/entrypoint.sh /entrypoint.sh
 
+# IVR用音声ファイル (メニュー / 混雑案内 / 保留音)
+# ./sounds は telauth/ にマウントされるため、衝突しない ivr/ に置く
+COPY asterisk/sounds/ /var/lib/asterisk/sounds/ivr/
+
 RUN chmod +x /entrypoint.sh
-RUN chown -R asterisk:asterisk /etc/asterisk
+RUN chown -R asterisk:asterisk /etc/asterisk /var/lib/asterisk/sounds/ivr
 
 ENTRYPOINT ["/entrypoint.sh"]

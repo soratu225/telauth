@@ -41,3 +41,7 @@ check_db_schema.py
 
 # Docker overrides
 docker-compose.override.yml
+
+# IVR prompt / hold music bundled with the Asterisk image (keep these)
+!asterisk/sounds/
+!asterisk/sounds/**/*.wav
