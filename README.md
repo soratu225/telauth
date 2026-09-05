@@ -113,7 +113,13 @@ curl -X DELETE http://localhost:8000/api/v1/phones/09012341234 \
 | `#` | メニューをもう一度再生 |
 | 無入力 / 無効入力 | メニューを再生し直す（3回で切断） |
 
-保留音は `asterisk/sounds/moh/` 内の wav をループ再生します。同梱の `hold_placeholder.wav` は仮の合成音なので、正式な保留音（8kHz / mono / 16bit wav）に差し替えてください。
+保留音は `asterisk/sounds/moh/` 内の wav をループ再生します。同梱の `scarlatti_k145.wav` はドメニコ・スカルラッティ「ソナタ ニ長調 K.145」の弦楽合奏版です。
+
+- 編曲・演奏: Michel Rondeau
+- 出典: [IMSLP](https://imslp.org/wiki/Keyboard_Sonata_in_D_major,_K.145_(Scarlatti,_Domenico))
+- ライセンス: [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)（クレジット表記が必要）
+
+別の曲に差し替える場合は 8kHz / mono / 16bit の wav を同じフォルダに置いてください。
 
 音声ファイルの変換例:
 
