@@ -5,7 +5,6 @@ services:
       - "8000:8000"
     volumes:
       - ./.env:/app/.env
-      - ./sounds:/var/lib/asterisk/sounds/telauth
       - ./data:/app/data
     env_file:
       - .env
@@ -28,9 +27,6 @@ services:
     ports:
       - "5060:5060/udp"
       - "10000-20000:10000-20000/udp"
-    volumes:
-      # FastAPIが生成した音声ファイルをAsteriskが読めるようにマウント
-      - ./sounds:/var/lib/asterisk/sounds/telauth
     env_file:
       - .env
     restart: unless-stopped

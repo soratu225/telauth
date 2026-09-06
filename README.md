@@ -1,11 +1,13 @@
 # 電話OTP認証サービス (telauth)
 
-Brastel Basix を利用して、電話でOTPを読み上げる認証サービスです。
+Brastel の SIP 回線と Asterisk を使った電話認証サービスです。
+運営者アプリが画面に認証コードを表示し、利用者がその電話番号から電話をかけてコードを入力すると、
+発信者番号に紐づくコードと照合して認証します。
 
 ## 特徴
 
-- 📞 **電話でOTP読み上げ** — Brastel Basix PBX APIで発信、XML IVRのTTSでコードを読み上げ
-- 🔑 **TOTP方式** — 電話番号ごとにシークレットを管理（RFC 6238準拠）
+- 📞 **電話でコード入力** — 利用者が電話をかけ、画面のコードをダイヤルキーで入力（`*` で確定）
+- 🔑 **TOTP方式** — 電話番号ごとにシークレットを管理（RFC 6238準拠）。他人のコードは発信者番号が違うので照合に失敗
 - 🔒 **暗号化ストレージ** — TOTPシークレットはFernet暗号化してDBに保存
 - 🚦 **レート制限** — 同一番号への連続発信を制限（デフォルト5分に1回）
 - 🛡️ **APIキー認証** — 運営者向けAPIはX-API-Keyヘッダーで保護
@@ -26,10 +28,8 @@ cp .env.example .env
 | 変数 | 説明 |
 |------|------|
 | `API_KEY` | 運営者向けAPIの認証キー |
-| `BRASTEL_DOMAIN` | Basixドメイン名 |
-| `BRASTEL_API_TOKEN` | Basix APIトークン |
-| `BRASTEL_IVR_EXTENSION` | IVR拡張番号（Basixダッシュボードで設定） |
-| `IVR_CALLBACK_BASE_URL` | 外部公開されたサーバーURL（BasixがコールバックするURL） |
+| `BRASTEL_SIP_USERNAME` / `BRASTEL_SIP_PASSWORD` | Brastel の SIP アカウント |
+| `INTERNAL_TOKEN` | Asterisk → API の内部呼び出しを守るトークン（推奨。空なら検査しない） |
 
 ### 2. インストール
 
@@ -47,28 +47,47 @@ API ドキュメント: http://localhost:8000/docs
 
 ---
 
-## Brastelダッシュボード設定
+## 認証の流れ
 
-1. **IVR拡張番号の作成**
-   - BasixダッシュボードでカスタムIVR拡張番号を作成
-   - XML Server URLに `{IVR_CALLBACK_BASE_URL}/ivr/speak?token={IVR_SECRET_TOKEN}` を設定
-
-2. **IVR_CALLED_NUMBER_PARAM の確認**
-   - BasixがコールバックPOSTで送る「発信先電話番号」のパラメータ名を確認
-   - `.env` の `IVR_CALLED_NUMBER_PARAM` に設定（デフォルト: `called_number`）
+1. 運営者アプリが `POST /api/v1/code` に利用者の電話番号を渡し、返ってきた認証コードを画面に表示する
+2. 利用者がその電話番号から電話をかけ、メニューで `1` を押す
+3. 案内のあとの発信音（ピッ）に続けてコードを入力し、`*`（コメジルシ）で確定する
+4. Asterisk が発信者番号と入力コードを `GET /api/v1/inbound-verify` に渡し、TOTP を照合する
+5. 一致すれば「認証が完了しました」を流して切断。運営者アプリは `GET /api/v1/auth-status` で完了を確認する
+6. 不一致なら「コードが違うようです」を流して再入力（5回で切断。API 側も有効期間内に5回失敗した番号をロック）
 
 ---
 
 ## 運営者向けAPI
 
-### 発信してOTPを読み上げる
+### 画面に表示する認証コードを発行する
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/call-otp \
+curl -X POST http://localhost:8000/api/v1/code \
   -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
   -d '{"phone_number": "09012341234"}'
+# => {"phone_number":"09012341234","code":"123456","expires_in_seconds":540}
 ```
+
+### 電話での認証が完了したか確認する
+
+```bash
+curl "http://localhost:8000/api/v1/auth-status?phone_number=09012341234" \
+  -H "X-API-Key: your-api-key"
+# => {"phone_number":"09012341234","verified":true,"verified_at":"2026-09-06T02:30:00Z"}
+```
+
+`within_seconds` で遡る秒数を指定できます（既定はコードの有効期間）。
+
+### 着信・認証ログを取得する
+
+```bash
+curl "http://localhost:8000/api/v1/logs?phone_number=09012341234" \
+  -H "X-API-Key: your-api-key"
+```
+
+status は `inbound_answered`（着信）/ `completed`（通話終了）/ `verified`（照合成功）/ `verify_failed`（照合失敗）です。
 
 ### OTPコードを検証する
 
@@ -115,7 +134,7 @@ curl -X DELETE http://localhost:8000/api/v1/phones/09012341234 \
 
 | キー | 動作 |
 |------|------|
-| `1` | 電話認証（認証コード読み上げ。`#` で繰り返し、5秒無応答で終了） |
+| `1` | 電話認証（画面の認証コードを入力して `*` で確定） |
 | `2` `3` | 混雑案内 `asterisk/sounds/queue_notice.wav` を再生後、保留音を流し続ける（オペレーター接続は未実装） |
 | `4` | 内線番号をお持ちの方（内線の仕組みは未実装。当面は `2` `3` と同じ混雑案内 + 保留音） |
 | `#` | メニューをもう一度再生 |
@@ -138,24 +157,20 @@ ffmpeg -i input.mp3 -ar 8000 -ac 1 -acodec pcm_s16le asterisk/sounds/ivr_menu.wa
 
 音声・ダイヤルプランは Asterisk イメージに焼き込まれ、起動時に entrypoint.sh がボリュームへ展開します。変更後は `docker compose build asterisk && docker compose up -d --force-recreate asterisk` で反映してください。
 
-## 読み上げ音声の内容
+## 電話認証の音声
 
-メニューで `1` を押すと、以下の流れで認証コードを読み上げます（数字は例）。
+メニューで `1` を押すと、以下の順に流れます（音声は `asterisk/sounds/` の wav）。
 
-```
-認証コードをお伝えします。
-（無音）
-認証コードは、 いち。に。さん。よん。ご。ろく。 です。
-もう一度繰り返します。認証コードは、 いち。に。さん。よん。ご。ろく。 です。
-（無音）
-もう一度お聞きになる場合は、シャープを押してください。
-```
+| ファイル | 内容 |
+|------|------|
+| `otp_prompt.wav` | 電話認証サービスです。ピーッとなったら画面に表示されている認証コードを入力して、コメジルシを押してください。なお、他人のコードを入力することは絶対におやめください。 |
+| `beep.wav` | 発信音（1kHz, 0.5秒。ffmpeg で生成） |
+| `otp_success.wav` | 認証が完了しました。お電話、ありがとうございました。 |
+| `otp_wrong.wav` | コードが違うようです。画面をご確認の上、もう一度入力してください。 |
 
-- 5秒以上応答がなければ「ご利用ありがとうございました。」を流して切断します。
-- `#` が押されると「繰り返します。認証コードは、 … です。」を流し、再び「もう一度お聞きになる場合は…」に戻ります（押される限り繰り返し。安全のため10回で終了）。
-- `#` 以外のキーは無視して案内をもう一度流します。
-
-音声は `app/tts.py` が gTTS で生成します。コード部分（`telauth/otp_<番号>_main` / `_repeat`）は着信ごとに、固定文言（`telauth/prompt_repeat` / `telauth/goodbye`）は初回のみ生成してキャッシュします。
+- 数字キーでコードを入力し、`*` で確定します。`#` など他のキーは無視します。
+- 15秒入力がなければ案内をもう一度流します。
+- 照合失敗と無入力をあわせて 5 回で切断します。
 
 ---
 
@@ -170,27 +185,21 @@ pytest tests/ -v
 ## アーキテクチャ
 
 ```
-[運営者アプリ]
-    |
-    | POST /api/v1/call-otp  (X-API-Key認証)
-    v
-[telauth API サーバー]
-    |
-    | POST /api/initiate_call (Basic Auth)
-    v
-[Brastel Basix PBX]
-    |
-    | 発信: ユーザーの電話番号
-    v
-[ユーザーの電話]
-    |
-    | 着信接続後、BasixがXML Server URLをPOST
-    v
-[telauth /ivr/speak]
-    |
-    | DB からシークレット取得 → TOTP生成 → TTS XML返却
-    v
-[Brastel がTTSで読み上げ]
+[運営者アプリ]                          [利用者の電話]
+    |                                        |
+    | POST /api/v1/code (X-API-Key)          | 発信 → Brastel → Asterisk (メニューで 1)
+    | → 認証コードを画面に表示               |
+    |                                        v
+    |                              [Asterisk ダイヤルプラン otp-auth]
+    |                                 案内 → ピッ → 数字を収集 → * で確定
+    |                                        |
+    |                                        | GET /api/v1/inbound-verify?phone_number=&code=
+    |                                        v
+    |                              [telauth API サーバー]
+    |                                 発信者番号のシークレットで TOTP 照合 → CallLog に記録
+    |                                        |
+    | GET /api/v1/auth-status (X-API-Key)    | 200 → 「認証が完了しました」/ 401 → 「コードが違うようです」
+    | → verified=true で認証完了            v
 ```
 
 ## ファイル構成
@@ -203,15 +212,16 @@ telauth/
 │   ├── database.py      # SQLAlchemy設定
 │   ├── models.py        # DBモデル（PhoneSecret, CallLog）
 │   ├── otp.py           # TOTP生成・検証・暗号化
-│   ├── brastel.py       # Basix PBX APIクライアント
+│   ├── asterisk_ami.py  # Asterisk AMI クライアント（アウトバウンド用、現在未使用）
 │   └── routers/
-│       ├── operator.py  # 運営者向けAPI
-│       └── ivr.py       # IVRコールバック
+│       └── operator.py  # 運営者向けAPI + Asterisk 内部呼び出し
+├── asterisk/
+│   ├── extensions.conf  # ダイヤルプラン（IVRメニュー / 電話認証）
+│   ├── pjsip.conf.template
+│   └── sounds/          # メニュー・案内音声 (wav 8kHz mono)
 ├── tests/
 │   ├── conftest.py      # テストフィクスチャ
-│   ├── test_otp.py      # OTPユニットテスト
-│   ├── test_operator.py # 運営者APIテスト
-│   └── test_ivr.py      # IVRコールバックテスト
+│   └── test_operator.py # API テスト
 ├── .env.example
 ├── requirements.txt
 ├── Dockerfile

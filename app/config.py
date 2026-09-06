@@ -45,14 +45,17 @@ class Settings(BaseSettings):
     asterisk_endpoint: str = "brastel-endpoint"
     asterisk_call_timeout_ms: int = 30000
 
-    # TTS設定
-    tts_lang: str = "ja"
-    tts_sounds_dir: str = "/var/lib/asterisk/sounds/telauth"
+    # Asterisk → API の内部呼び出し (/api/v1/inbound, /inbound-verify, /call-complete) を守るトークン。
+    # 空なら検査しない (ポート8000をローカルに閉じている前提)。設定時はダイヤルプランが
+    # ${ENV(INTERNAL_TOKEN)} を X-Internal-Token ヘッダで送る。
+    internal_token: str = ""
 
     # OTP設定
     otp_interval_seconds: int = 900  # 15分
     otp_digits: int = 6
     call_rate_limit_seconds: int = 300  # 5分
+    # 有効期間内に同じ番号でこれ以上コード照合に失敗したら、以後は正しいコードでも拒否する (総当たり対策)
+    verify_max_failures: int = 5
 
     # データベース
     database_url: str = "sqlite+aiosqlite:///./telauth.db"
