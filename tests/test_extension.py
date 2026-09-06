@@ -321,3 +321,17 @@ async def test_join_page_ignores_placeholder_public_base_url(client, ext_env, mo
     # DM 側もリンクボタンではなくパス表記になる
     card = ext_env[0].latest_card(STAFF[0])
     assert card.buttons == [] and "/ext/join/" in card.description
+
+
+async def test_client_log_requires_secret(client, ext_env):
+    _, call_id = (await _start(client)).split()
+    async with TestSessionLocal() as db:
+        call = await svc.accept(db, int(call_id), STAFF[0], "佐藤")
+    resp = await client.post(f"/ext/join/{call_id}/client-log", params={"t": "wrong"}, json={"event": "x"})
+    assert resp.status_code == 404
+    resp = await client.post(f"/ext/join/{call_id}/client-log", params={"t": call.join_secret},
+                             json={"event": "failed", "detail": "User Denied Media Access", "ua": "Safari"})
+    assert resp.status_code == 200
+    page = (await client.get(f"/ext/join/{call_id}", params={"t": call.join_secret})).text
+    assert f"/ext/join/{call_id}/client-log?t={call.join_secret}" in page
+    assert "mediaStream: micStream" in page

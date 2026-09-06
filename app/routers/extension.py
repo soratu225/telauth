@@ -140,20 +140,29 @@ _JOIN_PAGE = """<!doctype html>
   const cfg = __CONFIG__;
   const $ = (id) => document.getElementById(id);
   const answerBtn = $("answer"), hangupBtn = $("hangup"), statusEl = $("status"), detailEl = $("detail"), audio = $("remote");
-  let ua = null, session = null;
+  let ua = null, session = null, micStream = null;
   const setStatus = (t, d) => { statusEl.textContent = t; detailEl.textContent = d || ""; };
+  // 何が起きたかをサーバーのログにも残す (遠隔で原因を追えるように)
+  const report = (event, detail) => {
+    try {
+      fetch(cfg.logUrl, { method: "POST", headers: { "Content-Type": "application/json" }, keepalive: true,
+        body: JSON.stringify({ event, detail: detail == null ? "" : String(detail).slice(0, 500), ua: navigator.userAgent }) }).catch(() => {});
+    } catch (e) {}
+  };
 
   answerBtn.addEventListener("click", async () => {
     answerBtn.disabled = true;
     setStatus("マイクを準備しています…");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      stream.getTracks().forEach((t) => t.stop());
+      // ボタン操作の中で取得したマイクをそのまま通話に使う (応答時に取り直すと iOS Safari 等で拒否されることがある)
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     } catch (e) {
       setStatus("マイクが使えません。ブラウザの許可設定を確認してください。", String(e));
+      report("mic_denied", e && (e.name + ": " + e.message));
       answerBtn.disabled = false;
       return;
     }
+    report("mic_ok");
     setStatus("接続しています…");
     try {
       const socket = new JsSIP.WebSocketInterface(cfg.wsUrl);
@@ -171,32 +180,44 @@ _JOIN_PAGE = """<!doctype html>
       answerBtn.disabled = false;
       return;
     }
-    ua.on("registered", () => { setStatus("準備できました。まもなく電話がつながります…"); hangupBtn.style.display = "inline-block"; });
-    ua.on("registrationFailed", (e) => setStatus("接続に失敗しました。", "registration: " + (e.cause || "")));
-    ua.on("disconnected", () => { if (!session) setStatus("サーバーとの接続が切れました。ページを再読み込みしてください。"); });
+    ua.on("registered", () => { setStatus("準備できました。まもなく電話がつながります…"); hangupBtn.style.display = "inline-block"; report("registered"); });
+    ua.on("registrationFailed", (e) => { setStatus("接続に失敗しました。", "registration: " + (e.cause || "")); report("registration_failed", e.cause); });
+    ua.on("disconnected", () => { if (!session) setStatus("サーバーとの接続が切れました。ページを再読み込みしてください。"); report("ws_disconnected"); });
     ua.on("newRTCSession", ({ session: s }) => {
       if (s.direction !== "incoming") return;
       session = s;
+      report("invite_received");
       s.on("peerconnection", ({ peerconnection }) => {
         peerconnection.addEventListener("track", (ev) => { audio.srcObject = ev.streams[0]; audio.play().catch(() => {}); });
+        peerconnection.addEventListener("iceconnectionstatechange", () => report("ice_" + peerconnection.iceConnectionState));
       });
-      s.on("confirmed", () => setStatus("通話中"));
-      s.on("ended", () => { setStatus("通話が終了しました。このページは閉じて大丈夫です。"); hangupBtn.style.display = "none"; ua.stop(); });
-      s.on("failed", (e) => { setStatus("通話に失敗しました。", e.cause || ""); hangupBtn.style.display = "none"; ua.stop(); });
-      s.answer({
-        mediaConstraints: { audio: true, video: false },
-        pcConfig: { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] },
-      });
-      setStatus("つないでいます…");
+      s.on("accepted", () => report("answered"));
+      s.on("confirmed", () => { setStatus("通話中"); report("confirmed"); });
+      s.on("ended", (e) => { setStatus("通話が終了しました。このページは閉じて大丈夫です。"); hangupBtn.style.display = "none"; report("ended", e && e.cause); stopAll(); });
+      s.on("failed", (e) => { setStatus("通話に失敗しました。", (e.cause || "") + (e.message && e.message.status_code ? " (" + e.message.status_code + ")" : "")); hangupBtn.style.display = "none"; report("failed", (e.cause || "") + " origin=" + (e.originator || "")); stopAll(); });
+      try {
+        s.answer({
+          mediaStream: micStream,
+          pcConfig: { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] },
+        });
+        setStatus("つないでいます…");
+      } catch (e) {
+        setStatus("応答に失敗しました。", String(e));
+        report("answer_exception", e);
+      }
     });
     ua.start();
   });
 
+  const stopAll = () => {
+    try { ua && ua.stop(); } catch (e) {}
+    try { micStream && micStream.getTracks().forEach((t) => t.stop()); } catch (e) {}
+  };
   hangupBtn.addEventListener("click", () => {
     if (session) { try { session.terminate(); } catch (e) {} }
-    else if (ua) { ua.stop(); setStatus("待機をやめました。"); hangupBtn.style.display = "none"; }
+    else if (ua) { stopAll(); setStatus("待機をやめました。"); hangupBtn.style.display = "none"; report("cancelled"); }
   });
-  window.addEventListener("beforeunload", () => { try { session && session.terminate(); ua && ua.stop(); } catch (e) {} });
+  window.addEventListener("beforeunload", () => { try { session && session.terminate(); } catch (e) {} stopAll(); });
 })();
 </script>
 </body>
@@ -231,6 +252,7 @@ async def join_page(call_id: int, request: Request, t: str = "", db: AsyncSessio
         "password": svc.slot_password(call.webrtc_slot),
         "domain": settings.sip_domain,
         "displayName": call.accepted_by_name or "staff",
+        "logUrl": f"/ext/join/{call.id}/client-log?t={call.join_secret}",
     }
     page = (
         _JOIN_PAGE.replace("__TITLE__", html.escape(f"{label} {caller}"))
@@ -239,6 +261,25 @@ async def join_page(call_id: int, request: Request, t: str = "", db: AsyncSessio
         .replace("__CONFIG__", json.dumps(config))
     )
     return HTMLResponse(page)
+
+
+class ClientLog(BaseModel):
+    event: str
+    detail: str = ""
+    ua: str = ""
+
+
+@router.post("/ext/join/{call_id}/client-log", include_in_schema=False)
+async def join_client_log(call_id: int, body: ClientLog, t: str = "", db: AsyncSession = Depends(get_db)):
+    """通話ページからの状況報告 (登録できた / 応答に失敗した など) をサーバーのログに残す。"""
+    call = await svc.get_call(db, call_id)
+    if call is None or not t or t != call.join_secret:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    logger.info(
+        f"通話ページ call={call_id} slot={call.webrtc_slot} event={body.event[:40]} "
+        f"detail={body.detail[:300]!r} ua={body.ua[:120]!r}"
+    )
+    return {"ok": True}
 
 
 @router.websocket("/ws")
