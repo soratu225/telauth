@@ -123,7 +123,7 @@ curl -X DELETE http://localhost:8000/api/v1/phones/09012341234 \
 
 ## 着信IVRメニュー
 
-着信すると `asterisk/sounds/ivr_menu.wav` のメニューが流れ、押されたキーで分岐します。
+着信すると呼び出し音を 5 秒鳴らしてから応答し、`asterisk/sounds/ivr_menu.wav` のメニューが流れ、押されたキーで分岐します。
 
 ```
 カスタマーサポートでございます。
