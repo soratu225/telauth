@@ -15,12 +15,21 @@ cp "$SRC/logger.conf"      "$ETC/logger.conf"
 cp "$SRC/pjsip.conf.template"   "$ETC/pjsip.conf"
 cp "$SRC/manager.conf.template" "$ETC/manager.conf"
 
-# sedを使って環境変数を置換 (追加パッケージ不要)
-sed -i "s/\${BRASTEL_SIP_USERNAME}/$BRASTEL_SIP_USERNAME/g" "$ETC/pjsip.conf"
-sed -i "s/\${BRASTEL_SIP_PASSWORD}/$BRASTEL_SIP_PASSWORD/g" "$ETC/pjsip.conf"
-sed -i "s/\${BRASTEL_SIP_SERVER}/$BRASTEL_SIP_SERVER/g" "$ETC/pjsip.conf"
+# 環境変数をテンプレートに展開する (sed の区切りは | 。値に含まれる | & \ はエスケープ)
+: "${REALTIMEKIT_SIP_HOST:=sip.dyte.io}"
+subst() {  # subst <file> <VAR>
+  eval "raw=\${$2}"
+  val=$(printf '%s' "$raw" | sed -e 's/[|&\\]/\\&/g')
+  sed -i "s|\${$2}|$val|g" "$1"
+}
+subst "$ETC/pjsip.conf" BRASTEL_SIP_USERNAME
+subst "$ETC/pjsip.conf" BRASTEL_SIP_PASSWORD
+subst "$ETC/pjsip.conf" BRASTEL_SIP_SERVER
+subst "$ETC/pjsip.conf" REALTIMEKIT_SIP_HOST
+subst "$ETC/pjsip.conf" REALTIMEKIT_SIP_USERNAME
+subst "$ETC/pjsip.conf" REALTIMEKIT_SIP_PASSWORD
 
-sed -i "s/\${ASTERISK_AMI_PASSWORD}/$ASTERISK_AMI_PASSWORD/g" "$ETC/manager.conf"
+subst "$ETC/manager.conf" ASTERISK_AMI_PASSWORD
 
 # IVR音声 (メニュー / 混雑案内 / 保留音) を sounds ボリュームへ展開
 rm -rf "$IVR_SOUNDS"

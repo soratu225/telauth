@@ -52,3 +52,33 @@ server_uri=sip:${BRASTEL_SIP_SERVER}
 client_uri=sip:${BRASTEL_SIP_USERNAME}@${BRASTEL_SIP_SERVER}
 retry_interval=60
 expiration=3600
+
+; ---------------------------------------------------------------------------
+; Cloudflare RealtimeKit (内線の通話先)。Dial(PJSIP/<meeting_id>@realtimekit) で
+; sip:<meeting_id>@${REALTIMEKIT_SIP_HOST} に発信する。認証情報は RealtimeKit の Developer Portal で発行。
+; ---------------------------------------------------------------------------
+[realtimekit-auth]
+type=auth
+auth_type=userpass
+username=${REALTIMEKIT_SIP_USERNAME}
+password=${REALTIMEKIT_SIP_PASSWORD}
+
+[realtimekit-aor]
+type=aor
+contact=sip:${REALTIMEKIT_SIP_HOST}
+
+[realtimekit]
+type=endpoint
+transport=transport-udp
+aors=realtimekit-aor
+outbound_auth=realtimekit-auth
+from_user=${REALTIMEKIT_SIP_USERNAME}
+context=from-realtimekit
+dtmf_mode=auto
+disallow=all
+allow=ulaw
+allow=alaw
+rewrite_contact=yes
+rtp_symmetric=yes
+force_rport=yes
+direct_media=no

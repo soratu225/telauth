@@ -9,7 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import init_db
-from app.routers import operator
+from app.notify import set_notifier
+from app.routers import extension, operator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,12 +21,26 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """起動時にDBを初期化する。"""
+    """起動時にDBを初期化し、Discord Bot (内線通知) を起動する。"""
     logger.info("データベースを初期化しています...")
     await init_db()
+
+    bot = None
+    if settings.discord_bot_token:
+        from app.discord_bot import DiscordNotifier
+
+        bot = DiscordNotifier(settings.discord_bot_token)
+        set_notifier(bot)
+        await bot.start()
+        logger.info("Discord Bot を起動しました (内線通知)")
+    else:
+        logger.warning("DISCORD_BOT_TOKEN が未設定のため、内線の呼び出し通知は送られません")
+
     logger.info(f"サービス起動: {settings.service_name}")
     yield
     logger.info("サービスを停止しています...")
+    if bot:
+        await bot.stop()
 
 app = FastAPI(
     title="電話OTP認証サービス API",
@@ -48,6 +63,7 @@ app.add_middleware(
 )
 
 app.include_router(operator.router)
+app.include_router(extension.router)
 
 @app.get("/", include_in_schema=False)
 async def root():

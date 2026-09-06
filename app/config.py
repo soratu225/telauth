@@ -60,6 +60,29 @@ class Settings(BaseSettings):
     # データベース
     database_url: str = "sqlite+aiosqlite:///./telauth.db"
 
+    # --- 内線 (Discord 通知 + RealtimeKit) ---
+    # 担当者への DM を送る Discord Bot のトークン (空なら通知しない = 内線は常に応答なし扱い)
+    discord_bot_token: str = ""
+    # Cloudflare RealtimeKit: 会議の作成と参加トークン発行に使う
+    cf_account_id: str = ""
+    cf_api_token: str = ""
+    realtimekit_app_id: str = ""
+    realtimekit_preset_name: str = "group_call_host"
+    # Asterisk が会議へ SIP 発信する先 (pjsip.conf に展開される)
+    realtimekit_sip_host: str = "sip.dyte.io"
+    realtimekit_sip_username: str = ""
+    realtimekit_sip_password: str = ""
+    # 担当者に送る参加ページの URL の元 (https 必須。マイク利用のため)
+    public_base_url: str = ""
+    # 内線番号 → 担当者 Discord ユーザーID の対応表
+    extensions_file: str = "extensions.json"
+    # 受付時間 (この時間外は Discord に送らず案内して切断)
+    extension_hours_start: int = 9
+    extension_hours_end: int = 22
+    extension_timezone: str = "Asia/Tokyo"
+    # 担当者の応答を待つ最大秒数 (ダイヤルプラン側の待ち時間と揃える)
+    extension_ring_timeout_seconds: int = 180
+
     def get_fernet_key(self) -> bytes:
         if self.secret_encryption_key:
             key = self.secret_encryption_key.encode()
