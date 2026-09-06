@@ -136,7 +136,7 @@ curl -X DELETE http://localhost:8000/api/v1/phones/09012341234 \
 |------|------|
 | `1` | 電話認証（画面の認証コードを入力して `*` で確定） |
 | `2` `3` | 混雑案内 `asterisk/sounds/queue_notice.wav` を再生後、保留音を流し続ける（オペレーター接続は未実装） |
-| `4` | 内線（内線番号を入力して `*` で確定 → Discord で担当者を呼び出し → RealtimeKit の通話へ接続） |
+| `4` | 内線（内線番号を入力して `*` で確定 → Discord で担当者を呼び出し → 担当者のブラウザで受話） |
 | `#` | メニューをもう一度再生 |
 | 無入力 / 無効入力 | メニューを再生し直す（3回で切断） |
 | 非通知着信 | メニューの前に `asterisk/sounds/no_callerid.wav`（発信者番号を通知してかけ直すよう案内）を再生して切断 |
@@ -288,7 +288,7 @@ telauth/
 │   ├── models.py        # DBモデル（PhoneSecret, CallLog）
 │   ├── otp.py           # TOTP生成・検証・暗号化
 │   ├── asterisk_ami.py  # Asterisk AMI クライアント（アウトバウンド用、現在未使用）
-│   ├── extension_calls.py # 内線呼び出し（Discord 通知 → 応答 → RealtimeKit 会議）
+│   ├── extension_calls.py # 内線呼び出し（Discord 通知 → 応答 → ブラウザ受話のスロット割り当て）
 │   ├── discord_bot.py   # Discord Bot（DM 送信とボタン処理）
 │   ├── notify.py        # 通知の抽象化（テストでは差し替え）
 │   └── routers/
