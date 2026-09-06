@@ -71,7 +71,11 @@ def is_open(now: datetime | None = None) -> bool:
 
 
 def format_phone(number: str) -> str:
-    """表示用にハイフンを入れる。例: 08012345678 -> 080-1234-5678"""
+    """表示用にハイフンを入れる。例: 08012345678 -> 080-1234-5678
+    特殊コマンド使用の非通知発信者は専用ラベルで表示する。
+    """
+    if number == "0000777000":
+        return "非通知（特殊コマンド使用）"
     digits = number
     if digits.startswith("+81"):
         digits = "0" + digits[3:]
