@@ -148,7 +148,7 @@ async def test_first_accept_wins_and_assigns_slot(client, ext_env):
     assert await _status(client, call_id) == "ACCEPTED web1"
 
     me = notifier.latest_card(STAFF[1])
-    assert "あなたが対応中" in me.description
+    assert "あなたが対応しています" in me.description
     assert _buttons(me) == [("通話に参加", "link")]
     assert me.buttons[0].url == f"https://telauth.example.test/ext/join/{call_id}?t={call.join_secret}"
     for other in (STAFF[0], STAFF[2]):
@@ -210,7 +210,7 @@ async def test_rejected_only_when_everyone_rejects(client, ext_env):
     assert await _status(client, call_id) == "REJECTED"
     for uid in STAFF:
         card = notifier.latest_card(uid)
-        assert "全員が対応できなかった" in card.description
+        assert "対応できる担当者がいなかった" in card.description
         assert card.buttons == []
 
 
@@ -228,7 +228,7 @@ async def test_timeout_and_ended(client, ext_env):
     assert resp.text == "TIMEOUT"
     for uid in STAFF:
         card = notifier.latest_card(uid)
-        assert "応答がなかった" in card.description
+        assert "出られなかった" in card.description
         assert card.buttons == []
 
     _, call_id2 = (await _start(client)).split()

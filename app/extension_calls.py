@@ -161,7 +161,7 @@ def card_for(call: ExtensionCall, user_id: str) -> CallCard:
 
     if call.status == "ringing":
         if user_id in rejected:
-            return CallCard(title, f"{head}\n❌ 拒否しました。他の担当者の応答を待っています。", COLOR_GRAY)
+            return CallCard(title, f"{head}\n拒否しました。他の担当者の応答を待っています。", COLOR_GRAY)
         return CallCard(
             title,
             f"{head}\n出られる方は「出る」を押してください。",
@@ -177,7 +177,7 @@ def card_for(call: ExtensionCall, user_id: str) -> CallCard:
             if public_base_url():
                 return CallCard(
                     title,
-                    f"{head}\n✅ あなたが対応中です。下のボタンから通話に参加してください。",
+                    f"{head}\nあなたが対応しています。下のボタンから対応してください！",
                     COLOR_OK,
                     [CardButton("通話に参加", "link", url=url)],
                 )
@@ -188,23 +188,23 @@ def card_for(call: ExtensionCall, user_id: str) -> CallCard:
             )
         return CallCard(title, f"{head}\n✅ {call.accepted_by_name} さんが対応中です。", COLOR_GRAY)
     if call.status == "ended":
-        return CallCard(title, f"{head}\n☎️ 通話が終了しました。（対応: {call.accepted_by_name}）", COLOR_GRAY)
+        return CallCard(title, f"{head}\n通話が終了しました。（対応者: {call.accepted_by_name}）", COLOR_GRAY)
     if call.status == "rejected":
         return CallCard(
             title,
-            f"{head}\n❌ 担当者全員が対応できなかったため、発信者には後ほどお掛け直しいただくよう案内しました。",
+            f"{head}\n対応できる担当者がいなかったため後ほどかけてくださいと案内しました",
             COLOR_NG,
         )
     if call.status == "timeout":
         minutes = max(1, settings.extension_ring_timeout_seconds // 60)
         return CallCard(
             title,
-            f"{head}\n⏰ {minutes}分以内に応答がなかったため、発信者には後ほどお掛け直しいただくよう案内しました。",
+            f"{head}\n{minutes}分以内に出られなかったので、後ほどかけてくださいと案内しておきました。",
             COLOR_NG,
         )
     return CallCard(
         title,
-        f"{head}\n⚠️ 通話の準備に失敗しました（空きがないか設定不足）。発信者には後ほどお掛け直しいただくよう案内しました。",
+        f"{head}\n通話準備に失敗しました...後ほどかけてくださいと案内しておきました。",
         COLOR_NG,
     )
 
