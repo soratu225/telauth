@@ -187,11 +187,22 @@ _JOIN_PAGE = """<!doctype html>
       if (s.direction !== "incoming") return;
       session = s;
       report("invite_received");
+      let iceTimer = null, answered = false, candidateTypes = {};
       s.on("peerconnection", ({ peerconnection }) => {
         peerconnection.addEventListener("track", (ev) => { audio.srcObject = ev.streams[0]; audio.play().catch(() => {}); });
         peerconnection.addEventListener("iceconnectionstatechange", () => report("ice_" + peerconnection.iceConnectionState));
+        peerconnection.addEventListener("icegatheringstatechange", () => report("gathering_" + peerconnection.iceGatheringState));
       });
-      s.on("accepted", () => report("answered"));
+      // JsSIP は ICE 候補の収集が「完了」するまで 200 OK を送らない。STUN に届かない環境では完了まで
+      // 長く待つ (または終わらない) ので、候補が出始めてから 1 秒で ready() を呼んで応答を送る。
+      // サーバー側は公開 IP を持っているので、ブラウザの候補が揃っていなくても接続できる。
+      s.on("icecandidate", ({ candidate, ready }) => {
+        if (candidate && candidate.type) candidateTypes[candidate.type] = (candidateTypes[candidate.type] || 0) + 1;
+        clearTimeout(iceTimer);
+        iceTimer = setTimeout(() => { report("ice_ready_early", JSON.stringify(candidateTypes)); ready(); }, 1000);
+      });
+      s.on("accepted", () => { answered = true; clearTimeout(iceTimer); report("answered", JSON.stringify(candidateTypes)); });
+      setTimeout(() => { if (!answered && session === s) report("answer_timeout", "gathering=" + (s.connection && s.connection.iceGatheringState) + " ice=" + (s.connection && s.connection.iceConnectionState) + " " + JSON.stringify(candidateTypes)); }, 8000);
       s.on("confirmed", () => { setStatus("通話中"); report("confirmed"); });
       s.on("ended", (e) => { setStatus("通話が終了しました。このページは閉じて大丈夫です。"); hangupBtn.style.display = "none"; report("ended", e && e.cause); stopAll(); });
       s.on("failed", (e) => { setStatus("通話に失敗しました。", (e.cause || "") + (e.message && e.message.status_code ? " (" + e.message.status_code + ")" : "")); hangupBtn.style.display = "none"; report("failed", (e.cause || "") + " origin=" + (e.originator || "")); stopAll(); });

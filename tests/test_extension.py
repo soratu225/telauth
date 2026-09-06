@@ -335,3 +335,4 @@ async def test_client_log_requires_secret(client, ext_env):
     page = (await client.get(f"/ext/join/{call_id}", params={"t": call.join_secret})).text
     assert f"/ext/join/{call_id}/client-log?t={call.join_secret}" in page
     assert "mediaStream: micStream" in page
+    assert 'on("icecandidate"' in page and "ready()" in page
