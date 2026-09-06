@@ -9,7 +9,6 @@ import pytest
 from app import extension_calls as svc
 from app.config import get_settings
 from app.notify import CallCard, NotificationRef, set_notifier, NullNotifier
-from app.realtimekit import RealtimeKitError, set_realtimekit
 from tests.conftest import TestSessionLocal
 
 settings = get_settings()
@@ -44,27 +43,6 @@ class FakeNotifier:
         raise AssertionError(f"no card for {user_id}")
 
 
-class FakeRTK:
-    def __init__(self, fail=False):
-        self.fail = fail
-        self.meetings = 0
-        self.participants: list[tuple[str, str, str]] = []
-
-    @property
-    def configured(self):
-        return True
-
-    async def create_meeting(self, title):
-        if self.fail:
-            raise RealtimeKitError("boom")
-        self.meetings += 1
-        return f"meeting-{self.meetings}"
-
-    async def add_participant(self, meeting_id, name, custom_participant_id):
-        self.participants.append((meeting_id, name, custom_participant_id))
-        return f"token-for-{custom_participant_id}"
-
-
 @pytest.fixture
 def ext_env(monkeypatch, tmp_path):
     ext_file = tmp_path / "extensions.json"
@@ -77,11 +55,11 @@ def ext_env(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "extension_hours_end", 24)
     monkeypatch.setattr(settings, "public_base_url", "https://telauth.example.test")
     monkeypatch.setattr(svc, "session_factory", TestSessionLocal)
+    monkeypatch.setattr(settings, "webrtc_secret", "test-secret")
+    monkeypatch.setattr(settings, "webrtc_slots", 2)
     notifier = FakeNotifier()
-    rtk = FakeRTK()
     set_notifier(notifier)
-    set_realtimekit(rtk)
-    yield notifier, rtk
+    yield notifier, None
     set_notifier(NullNotifier())
 
 
@@ -158,17 +136,16 @@ async def test_start_without_reachable_staff_is_error(client, ext_env):
     assert await _status(client, call_id) == "ERROR"
 
 
-async def test_first_accept_wins_and_creates_meeting(client, ext_env):
-    notifier, rtk = ext_env
+async def test_first_accept_wins_and_assigns_slot(client, ext_env):
+    notifier, _ = ext_env
     _, call_id = (await _start(client)).split()
     call_id = int(call_id)
 
     async with TestSessionLocal() as db:
         call = await svc.accept(db, call_id, STAFF[1], "田中")
     assert call.status == "accepted"
-    assert call.meeting_id == "meeting-1"
-    assert rtk.participants == [("meeting-1", "田中", f"discord-{STAFF[1]}")]
-    assert await _status(client, call_id) == "ACCEPTED meeting-1"
+    assert call.webrtc_slot == "web1"
+    assert await _status(client, call_id) == "ACCEPTED web1"
 
     me = notifier.latest_card(STAFF[1])
     assert "あなたが対応中" in me.description
@@ -183,8 +160,37 @@ async def test_first_accept_wins_and_creates_meeting(client, ext_env):
     async with TestSessionLocal() as db:
         call2 = await svc.accept(db, call_id, STAFF[2], "鈴木")
     assert call2.accepted_by == STAFF[1]
-    assert rtk.meetings == 1
+    assert call2.webrtc_slot == "web1"
     assert "田中 さんが対応中" in notifier.latest_card(STAFF[2]).description
+
+
+async def test_slots_are_pooled_and_released(client, ext_env):
+    ids = []
+    for _ in range(3):
+        _, cid = (await _start(client)).split()
+        ids.append(int(cid))
+    async with TestSessionLocal() as db:
+        a = await svc.accept(db, ids[0], STAFF[0], "A")
+        b = await svc.accept(db, ids[1], STAFF[1], "B")
+        c = await svc.accept(db, ids[2], STAFF[2], "C")  # プールは 2 つ → 空きなし
+    assert (a.webrtc_slot, b.webrtc_slot) == ("web1", "web2")
+    assert c.status == "error" and c.webrtc_slot is None
+
+    await client.get(f"/api/v1/extension-call/{ids[0]}/ended")  # web1 が空く
+    _, cid = (await _start(client)).split()
+    async with TestSessionLocal() as db:
+        d = await svc.accept(db, int(cid), STAFF[0], "D")
+    assert d.webrtc_slot == "web1"
+
+
+def test_slot_password_matches_entrypoint_formula(monkeypatch):
+    """entrypoint.sh: printf '%s' "$SECRET:$slot" | sha256sum | cut -c1-32"""
+    import hashlib
+    monkeypatch.setattr(settings, "webrtc_secret", "abc")
+    assert svc.slot_password("web1") == hashlib.sha256(b"abc:web1").hexdigest()[:32]
+    monkeypatch.setattr(settings, "webrtc_secret", "")
+    monkeypatch.setattr(settings, "internal_token", "tok")
+    assert svc.slot_password("web2") == hashlib.sha256(b"tok:web2").hexdigest()[:32]
 
 
 async def test_rejected_only_when_everyone_rejects(client, ext_env):
@@ -233,16 +239,6 @@ async def test_timeout_and_ended(client, ext_env):
     assert "通話が終了しました" in notifier.latest_card(STAFF[0]).description
 
 
-async def test_realtimekit_failure_marks_error(client, ext_env):
-    notifier, rtk = ext_env
-    rtk.fail = True
-    _, call_id = (await _start(client)).split()
-    async with TestSessionLocal() as db:
-        await svc.accept(db, int(call_id), STAFF[0], "佐藤")
-    assert await _status(client, call_id) == "ERROR"
-    assert "失敗" in notifier.latest_card(STAFF[1]).description
-
-
 async def test_join_page(client, ext_env):
     _, call_id = (await _start(client)).split()
     call_id = int(call_id)
@@ -253,13 +249,34 @@ async def test_join_page(client, ext_env):
     assert resp.status_code == 404
     resp = await client.get(f"/ext/join/{call_id}", params={"t": call.join_secret})
     assert resp.status_code == 200
-    assert "rtk-meeting" in resp.text
-    assert f'"token-for-discord-{STAFF[0]}"' in resp.text
+    assert "/static/jssip-3.13.8.min.js" in resp.text
+    assert "080-1234-5678" in resp.text
+    cfg = json.loads(resp.text.split("const cfg = ", 1)[1].split(";\n", 1)[0])
+    assert cfg["wsUrl"] == "wss://telauth.example.test/ws"
+    assert cfg["user"] == "web1"
+    assert cfg["password"] == svc.slot_password("web1")
+    assert cfg["displayName"] == "佐藤"
 
     await client.get(f"/api/v1/extension-call/{call_id}/ended")
     resp = await client.get(f"/ext/join/{call_id}", params={"t": call.join_secret})
     assert resp.status_code == 200
     assert "終了" in resp.text
+
+
+async def test_join_page_ws_url_from_request_when_no_public_base(client, ext_env, monkeypatch):
+    monkeypatch.setattr(settings, "public_base_url", "")
+    _, call_id = (await _start(client)).split()
+    async with TestSessionLocal() as db:
+        call = await svc.accept(db, int(call_id), STAFF[0], "佐藤")
+    resp = await client.get(f"/ext/join/{call_id}", params={"t": call.join_secret},
+                            headers={"host": "tunnel.example.com", "x-forwarded-proto": "https"})
+    assert '"wsUrl": "wss://tunnel.example.com/ws"' in resp.text
+
+
+async def test_static_jssip_is_served(client):
+    resp = await client.get("/static/jssip-3.13.8.min.js")
+    assert resp.status_code == 200
+    assert "WebSocketInterface" in resp.text
 
 
 async def test_internal_endpoints_need_token(client, ext_env, monkeypatch):

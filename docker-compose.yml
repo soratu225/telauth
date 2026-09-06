@@ -1,8 +1,9 @@
 services:
   app:
     build: .
-    ports:
-      - "8000:8000"
+    # Asterisk と同じく host ネットワーク: Asterisk からの curl (127.0.0.1:8000) と、
+    # /ws → Asterisk の WebSocket (127.0.0.1:8088) の中継を同一ホスト内で完結させる
+    network_mode: "host"
     volumes:
       - ./.env:/app/.env
       - ./data:/app/data
@@ -10,7 +11,7 @@ services:
       - .env
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///./data/telauth.db
-      - ASTERISK_HOST=asterisk
+      - ASTERISK_HOST=127.0.0.1
     depends_on:
       - asterisk
     restart: unless-stopped
@@ -31,3 +32,15 @@ services:
       - .env
     restart: unless-stopped
     network_mode: "host" # SIP/RTPの通信（NAT越え）を安定させるために推奨
+
+  # 通話ページを https で公開するための Cloudflare Tunnel (任意)。
+  # Zero Trust → Networks → Tunnels でトンネルを作り、Public hostname を http://localhost:8000 に向け、
+  # トークンを .env の TUNNEL_TOKEN に入れて `docker compose --profile tunnel up -d` で起動する。
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    network_mode: "host"
+    restart: unless-stopped
+    profiles: ["tunnel"]

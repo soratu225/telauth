@@ -3,7 +3,9 @@ app/extension_calls.py - 内線呼び出しサービス
 
 流れ:
   start_call : 内線番号と受付時間を確認し、担当者全員の Discord DM に「出る / 拒否」付きの通知を送る
-  accept     : 最初に「出る」を押した人が担当。RealtimeKit の会議を作り、その人の DM だけに参加 URL を出す
+  accept     : 最初に「出る」を押した人が担当。担当者用の SIP アカウント (web1..webN) を割り当て、
+               その人の DM だけに通話ページの URL を出す。ページが Asterisk に WebSocket で登録すると
+               ダイヤルプランがそのアカウントへ Dial して発信者とつなぐ
   reject     : 全員が拒否したら rejected
   timeout    : 待ち時間 (既定 3 分) を過ぎたら timeout
   ended      : 通話終了
@@ -11,21 +13,21 @@ app/extension_calls.py - 内線呼び出しサービス
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import AsyncSessionLocal
 from app.models import ExtensionCall
 from app.notify import CallCard, CardButton, NotificationRef, get_notifier
-from app.realtimekit import get_realtimekit
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -87,6 +89,38 @@ def format_phone(number: str) -> str:
 def join_url(call: ExtensionCall) -> str:
     base = settings.public_base_url.rstrip("/")
     return f"{base}/ext/join/{call.id}?t={call.join_secret}"
+
+
+# ---------------------------------------------------------------------------
+# 担当者用 SIP アカウント (WebRTC) のプール
+# ---------------------------------------------------------------------------
+
+def webrtc_secret() -> str:
+    return settings.webrtc_secret or settings.internal_token or "changeme"
+
+
+def slot_password(slot: str) -> str:
+    """entrypoint.sh と同じ計算: sha256("<secret>:<slot>") の先頭 32 文字。"""
+    return hashlib.sha256(f"{webrtc_secret()}:{slot}".encode()).hexdigest()[:32]
+
+
+def all_slots() -> list[str]:
+    return [f"web{i}" for i in range(1, settings.webrtc_slots + 1)]
+
+
+async def pick_free_slot(db: AsyncSession) -> str | None:
+    """通話中 (accepted) の呼び出しが使っていないスロットを返す。古い取りこぼしは 2 時間で解放。"""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+    result = await db.execute(
+        select(ExtensionCall.webrtc_slot)
+        .where(ExtensionCall.status == "accepted")
+        .where(ExtensionCall.accepted_at >= cutoff)
+    )
+    in_use = {row[0] for row in result.all() if row[0]}
+    for slot in all_slots():
+        if slot not in in_use:
+            return slot
+    return None
 
 
 def _label(call: ExtensionCall) -> str:
@@ -151,7 +185,7 @@ def card_for(call: ExtensionCall, user_id: str) -> CallCard:
         )
     return CallCard(
         title,
-        f"{head}\n⚠️ 通話の準備に失敗しました。発信者には後ほどお掛け直しいただくよう案内しました。",
+        f"{head}\n⚠️ 通話の準備に失敗しました（空きがないか設定不足）。発信者には後ほどお掛け直しいただくよう案内しました。",
         COLOR_NG,
     )
 
@@ -179,7 +213,7 @@ async def get_call(db: AsyncSession, call_id: int) -> ExtensionCall | None:
 def status_line(call: ExtensionCall) -> str:
     """Asterisk が読む 1 行の状態。"""
     if call.status == "accepted":
-        return f"ACCEPTED {call.meeting_id or ''}".rstrip()
+        return f"ACCEPTED {call.webrtc_slot or ''}".rstrip()
     return call.status.upper()
 
 
@@ -249,19 +283,15 @@ async def accept(db: AsyncSession, call_id: int, user_id: str, user_name: str) -
         await _render(call, only_user=user_id)
         return call
 
-    try:
-        rtk = get_realtimekit()
-        meeting_id = await rtk.create_meeting(f"内線{call.extension} {format_phone(call.phone_number)}")
-        token = await rtk.add_participant(meeting_id, user_name, f"discord-{user_id}")
-        call.meeting_id = meeting_id
-        call.rtk_auth_token = token
-        await db.commit()
-        logger.info(f"内線 応答: call={call.id} by={user_name}({user_id}) meeting={meeting_id}")
-    except Exception as e:
-        logger.error(f"RealtimeKit 会議作成に失敗: call={call.id}: {e}")
+    slot = await pick_free_slot(db)
+    if slot is None:
+        logger.error(f"内線 空きスロットなし: call={call.id} (WEBRTC_SLOTS={settings.webrtc_slots})")
         call.status = "error"
         call.ended_at = datetime.now(timezone.utc)
-        await db.commit()
+    else:
+        call.webrtc_slot = slot
+        logger.info(f"内線 応答: call={call.id} by={user_name}({user_id}) slot={slot}")
+    await db.commit()
     await _render(call)
     return call
 

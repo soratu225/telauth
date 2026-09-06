@@ -175,17 +175,21 @@ ffmpeg -i input.mp3 -ar 8000 -ac 1 -acodec pcm_s16le asterisk/sounds/ivr_menu.wa
 ## 内線（メニュー 4）
 
 内線番号を押すと担当者の Discord に DM が届き、「出る」を押した人がブラウザで電話に出られます。
+通話は Asterisk 自前の WebRTC（SIP over WebSocket + DTLS-SRTP）で、外部の会議サービスは使いません。
 
 ```
 発信者: 4 → 内線番号 + *          担当者 (Discord DM)
    │                                📞 080-1234-5678 からお電話です！   [出る] [拒否]
    │ 「担当者を呼び出しています」                 │
-   │  保留音 (最大 3 分)                          │ 「出る」→ RealtimeKit の会議を作成
+   │  保留音 (最大 3 分)                          │ 「出る」→ 担当者用アカウント web1..webN を割り当て
    │                                              │   自分の DM にだけ「通話に参加」リンク
    │                                              │   他の人の DM は「○○さんが対応中」に編集
-   └─ Asterisk が会議へ SIP 発信 ──────── 通話 ── ブラウザで参加
+   │                                              ▼
+   │                                    通話ページ (JsSIP) が wss://.../ws で Asterisk に登録
+   └─ Asterisk が PJSIP/webN へ Dial ─── 通話 ─── ブラウザが自動応答
 ```
 
+- 「出る」のあと担当者がページを開いて登録されるまで最大 90 秒待ちます（その間も保留音）。
 - 全員が「拒否」、または 3 分応答がなければ「申し訳ありませんが、後ほどお掛け直しください」を流して切断します。DM は「応答なし」に編集されます。
 - 受付時間は `EXTENSION_HOURS_START`〜`EXTENSION_HOURS_END`（既定 9〜22 時、`Asia/Tokyo`）。時間外は Discord に送らず案内して切断します。
 - 通話が終わると担当者の DM は「通話が終了しました」に編集されます。
@@ -207,9 +211,30 @@ ffmpeg -i input.mp3 -ar 8000 -ac 1 -acodec pcm_s16le asterisk/sounds/ivr_menu.wa
 | 変数 | 内容 |
 |------|------|
 | `DISCORD_BOT_TOKEN` | Discord Developer Portal で作った Bot のトークン。Bot を担当者と同じサーバーに招待しておく（DM はサーバーを共有していないと届かない） |
-| `CF_ACCOUNT_ID` / `CF_API_TOKEN` / `REALTIMEKIT_APP_ID` | RealtimeKit の REST API 用。API トークンは Realtime 権限付き |
-| `REALTIMEKIT_SIP_HOST` / `REALTIMEKIT_SIP_USERNAME` / `REALTIMEKIT_SIP_PASSWORD` | Asterisk が会議へ SIP 発信するための認証情報（Developer Portal → API Keys → SIP） |
-| `PUBLIC_BASE_URL` | 担当者が開く通話ページの URL。ブラウザのマイク利用のため **https 必須**（Cloudflare Tunnel などでこのサーバーの 8000 番を公開） |
+| `PUBLIC_BASE_URL` | 担当者が開く通話ページの URL。ブラウザのマイク利用と wss のため **https 必須** |
+| `TUNNEL_TOKEN` | 通話ページを https で公開する Cloudflare Tunnel のトークン（下記） |
+| `WEBRTC_SECRET` | 担当者用 SIP アカウント（web1..webN）のパスワードの元。空なら `INTERNAL_TOKEN` を使う |
+| `WEBRTC_SLOTS` | 同時に受けられる担当者数（既定 8） |
+| `PUBLIC_IP` | サーバーの公開 IP。空なら起動時に自動検出。NAT 内でも WebRTC の音声が通るように SDP と ICE 候補に使う |
+
+### https での公開（Cloudflare Tunnel）
+
+ブラウザはマイクの利用と `wss://` 接続に https を要求するので、通話ページを https で公開する必要があります。
+Cloudflare にドメインがあれば Tunnel が一番簡単です（ルーターのポート開放は不要）。
+
+1. Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel（Cloudflared）
+2. Public hostname に `telauth.example.com` → `HTTP` `localhost:8000` を追加（WebSocket もこの 1 本で通ります）
+3. 表示されたトークンを `.env` の `TUNNEL_TOKEN` に、URL を `PUBLIC_BASE_URL` に入れる
+4. `docker compose --profile tunnel up -d`
+
+音声（RTP）は Tunnel を通らず、ルーターで転送済みの UDP 10000〜10020 を使います。
+
+### 仕組み（Asterisk 側）
+
+- `http.conf` で 127.0.0.1:8088 に WebSocket を開き、FastAPI の `/ws` がブラウザからの `wss` を中継します。Asterisk のポートは外に出しません。
+- `pjsip.conf` の `[transport-ws]` と `webrtc=yes` のテンプレートから、`entrypoint.sh` が起動時に `web1`〜`webN` のアカウントを生成します。パスワードは `sha256("<WEBRTC_SECRET>:<slot>")` の先頭 32 文字で、API 側も同じ計算で通話ページに埋め込みます。
+- `rtp.conf` の `[ice_host_candidates]` に「ローカル IP => 公開 IP」を書き足し、NAT 内でも正しい ICE 候補を出します。
+- ブラウザ側は JsSIP（`app/static/jssip-3.13.8.min.js`、esbuild で単一ファイル化）で登録と自動応答を行います。
 
 ### 音声
 
@@ -265,20 +290,22 @@ telauth/
 │   ├── asterisk_ami.py  # Asterisk AMI クライアント（アウトバウンド用、現在未使用）
 │   ├── extension_calls.py # 内線呼び出し（Discord 通知 → 応答 → RealtimeKit 会議）
 │   ├── discord_bot.py   # Discord Bot（DM 送信とボタン処理）
-│   ├── realtimekit.py   # Cloudflare RealtimeKit REST クライアント
 │   ├── notify.py        # 通知の抽象化（テストでは差し替え）
 │   └── routers/
 │       ├── operator.py  # 運営者向けAPI + Asterisk 内部呼び出し
-│       └── extension.py # 内線 API + 担当者用の通話ページ
+│       └── extension.py # 内線 API + 担当者用の通話ページ + /ws 中継
+│   └── static/jssip-3.13.8.min.js # 通話ページ用 JsSIP
 ├── asterisk/
-│   ├── extensions.conf  # ダイヤルプラン（IVRメニュー / 電話認証）
-│   ├── pjsip.conf.template
+│   ├── extensions.conf  # ダイヤルプラン（IVRメニュー / 電話認証 / 内線）
+│   ├── pjsip.conf.template  # Brastel + 担当者ブラウザ (WebRTC) のテンプレート
+│   ├── http.conf        # SIP over WebSocket (127.0.0.1:8088)
 │   └── sounds/          # メニュー・案内音声 (wav 8kHz mono)
 ├── extensions.json      # 内線番号 → 担当者 Discord ユーザーID
 ├── tests/
 │   ├── conftest.py      # テストフィクスチャ
 │   ├── test_operator.py # API テスト
-│   └── test_extension.py # 内線のテスト（Discord / RealtimeKit はフェイク）
+│   ├── test_extension.py # 内線のテスト（Discord はフェイク）
+│   └── test_ws_proxy.py  # /ws 中継のテスト
 ├── .env.example
 ├── requirements.txt
 ├── Dockerfile

@@ -54,31 +54,43 @@ retry_interval=60
 expiration=3600
 
 ; ---------------------------------------------------------------------------
-; Cloudflare RealtimeKit (内線の通話先)。Dial(PJSIP/<meeting_id>@realtimekit) で
-; sip:<meeting_id>@${REALTIMEKIT_SIP_HOST} に発信する。認証情報は RealtimeKit の Developer Portal で発行。
+; 担当者のブラウザ (内線の受話) 用 WebRTC
+;   ブラウザ → wss://<PUBLIC_BASE_URL>/ws → FastAPI が中継 → ws://127.0.0.1:8088/ws (http.conf)
+;   担当者用アカウントは web1..webN のプール。entrypoint.sh が [webrtc-*] テンプレートを使って
+;   このファイルの末尾に生成する (パスワード = sha256("<WEBRTC_SECRET>:<slot>") の先頭 32 文字)。
 ; ---------------------------------------------------------------------------
-[realtimekit-auth]
-type=auth
-auth_type=userpass
-username=${REALTIMEKIT_SIP_USERNAME}
-password=${REALTIMEKIT_SIP_PASSWORD}
+[transport-ws]
+type=transport
+protocol=ws
+bind=0.0.0.0
+; NAT 内なので SDP / Contact に公開 IP を書く (entrypoint.sh が PUBLIC_IP を展開)
+external_media_address=${PUBLIC_IP}
+external_signaling_address=${PUBLIC_IP}
+local_net=192.168.0.0/16
+local_net=172.16.0.0/12
+local_net=10.0.0.0/8
+local_net=127.0.0.0/8
 
-[realtimekit-aor]
-type=aor
-contact=sip:${REALTIMEKIT_SIP_HOST}
-
-[realtimekit]
+[webrtc-endpoint](!)
 type=endpoint
-transport=transport-udp
-aors=realtimekit-aor
-outbound_auth=realtimekit-auth
-from_user=${REALTIMEKIT_SIP_USERNAME}
-context=from-realtimekit
-dtmf_mode=auto
+context=from-webrtc
+; webrtc=yes = use_avpf, ice_support, media_encryption=dtls, dtls_auto_generate_cert, rtcp_mux などをまとめて有効化
+webrtc=yes
 disallow=all
+allow=opus
 allow=ulaw
 allow=alaw
+dtmf_mode=rfc4733
+direct_media=no
 rewrite_contact=yes
 rtp_symmetric=yes
 force_rport=yes
-direct_media=no
+
+[webrtc-aor](!)
+type=aor
+max_contacts=1
+remove_existing=yes
+
+[webrtc-auth](!)
+type=auth
+auth_type=userpass

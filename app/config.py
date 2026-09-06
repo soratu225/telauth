@@ -60,19 +60,19 @@ class Settings(BaseSettings):
     # データベース
     database_url: str = "sqlite+aiosqlite:///./telauth.db"
 
-    # --- 内線 (Discord 通知 + RealtimeKit) ---
+    # --- 内線 (Discord 通知 + ブラウザ受話 / Asterisk WebRTC) ---
     # 担当者への DM を送る Discord Bot のトークン (空なら通知しない = 内線は常に応答なし扱い)
     discord_bot_token: str = ""
-    # Cloudflare RealtimeKit: 会議の作成と参加トークン発行に使う
-    cf_account_id: str = ""
-    cf_api_token: str = ""
-    realtimekit_app_id: str = ""
-    realtimekit_preset_name: str = "group_call_host"
-    # Asterisk が会議へ SIP 発信する先 (pjsip.conf に展開される)
-    realtimekit_sip_host: str = "sip.dyte.io"
-    realtimekit_sip_username: str = ""
-    realtimekit_sip_password: str = ""
-    # 担当者に送る参加ページの URL の元 (https 必須。マイク利用のため)
+    # Asterisk 自前の WebRTC で担当者のブラウザに電話をつなぐ
+    #   担当者用の SIP アカウントは web1..webN のプール。パスワードは sha256(WEBRTC_SECRET:slot) の先頭 32 文字で、
+    #   Asterisk 側 (entrypoint.sh) と API 側で同じ計算をする。空なら INTERNAL_TOKEN を使う
+    webrtc_secret: str = ""
+    webrtc_slots: int = 8
+    # FastAPI が /ws を中継する先 (Asterisk の HTTP/WebSocket。app は host ネットワークで動かす)
+    asterisk_ws_url: str = "ws://127.0.0.1:8088/ws"
+    # ブラウザが SIP URI に使うドメイン (Asterisk はユーザー名だけで識別するので任意)
+    sip_domain: str = "telauth"
+    # 担当者に送る通話ページの URL の元 (https 必須。マイク利用と wss のため。Cloudflare Tunnel などで公開)
     public_base_url: str = ""
     # 内線番号 → 担当者 Discord ユーザーID の対応表
     extensions_file: str = "extensions.json"

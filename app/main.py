@@ -4,8 +4,11 @@ app/main.py - FastAPI アプリケーションエントリーポイント
 import logging
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.database import init_db
@@ -64,6 +67,8 @@ app.add_middleware(
 
 app.include_router(operator.router)
 app.include_router(extension.router)
+# 通話ページ用の JsSIP (esbuild で単一ファイルにしたもの)
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
 @app.get("/", include_in_schema=False)
 async def root():

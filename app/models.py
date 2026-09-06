@@ -77,9 +77,8 @@ class ExtensionCall(Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     accepted_by: Mapped[str | None] = mapped_column(String(32), nullable=True)
     accepted_by_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    # RealtimeKit の会議IDと、担当者が参加ページで使う認証トークン
-    meeting_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    rtk_auth_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 担当者のブラウザが登録する SIP アカウント (web1..webN のプールから割り当て)
+    webrtc_slot: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # 参加ページ URL の秘密 (Discord の DM に載せる)
     join_secret: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     # JSON: 通知先の Discord ユーザーID一覧 / 拒否したユーザーID一覧 / 送った DM の参照
