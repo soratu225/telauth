@@ -336,3 +336,44 @@ async def test_client_log_requires_secret(client, ext_env):
     assert f"/ext/join/{call_id}/client-log?t={call.join_secret}" in page
     assert "mediaStream: micStream" in page
     assert 'on("icecandidate"' in page and "ready()" in page
+
+
+async def test_dms_are_sent_concurrently(client, ext_env, monkeypatch):
+    """7 人分を順番に送ると Asterisk の待ち時間を超えるので、同時に送る。"""
+    import asyncio as _asyncio
+    notifier, _ = ext_env
+    orig = notifier.send
+    active = {"now": 0, "max": 0}
+
+    async def slow_send(user_id, card):
+        active["now"] += 1
+        active["max"] = max(active["max"], active["now"])
+        await _asyncio.sleep(0.05)
+        active["now"] -= 1
+        return await orig(user_id, card)
+
+    monkeypatch.setattr(notifier, "send", slow_send)
+    state, _ = (await _start(client)).split()
+    assert state == "RINGING"
+    assert active["max"] == len(STAFF)
+
+
+async def test_reject_during_send_is_rendered_afterwards(client, ext_env, monkeypatch):
+    """DM の参照を保存する前に押された「拒否」も、送信完了後に DM へ反映される。"""
+    notifier, _ = ext_env
+    orig = notifier.send
+    state = {"rejected": False}
+
+    async def send_then_reject(user_id, card):
+        ref = await orig(user_id, card)
+        if not state["rejected"]:
+            state["rejected"] = True
+            call_id = int(card.buttons[0].custom_id.split(":")[1])
+            async with TestSessionLocal() as db:
+                await svc.reject(db, call_id, user_id)
+        return ref
+
+    monkeypatch.setattr(notifier, "send", send_then_reject)
+    text = await _start(client)
+    assert text.startswith("RINGING")
+    assert "拒否しました" in notifier.latest_card(STAFF[0]).description

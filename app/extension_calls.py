@@ -13,6 +13,7 @@ app/extension_calls.py - 内線呼び出しサービス
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -253,15 +254,18 @@ async def start_call(db: AsyncSession, phone_number: str, extension: str) -> tup
     await db.refresh(call)
 
     notifier = get_notifier()
-    refs: list[dict] = []
-    for uid in cfg["discord_user_ids"]:
+
+    async def send_one(uid: str) -> dict | None:
         try:
             ref = await notifier.send(uid, card_for(call, uid))
         except Exception as e:
             logger.error(f"DM 送信に失敗: call={call.id} user={uid}: {e}")
-            ref = None
-        if ref:
-            refs.append(ref.to_dict())
+            return None
+        return ref.to_dict() if ref else None
+
+    # 全員に同時送信 (順番に送ると人数分の時間がかかり、Asterisk 側の待ち時間を超える)
+    results = await asyncio.gather(*(send_one(uid) for uid in cfg["discord_user_ids"]))
+    refs = [r for r in results if r]
     call.notifications = json.dumps(refs)
     if not refs:
         # 誰にも届かなければ待たせても無駄なので即エラー
@@ -272,6 +276,10 @@ async def start_call(db: AsyncSession, phone_number: str, extension: str) -> tup
         return "ERROR", call
     await db.commit()
     logger.info(f"内線 呼び出し開始: call={call.id} ext={extension} from={phone_number} to={len(refs)}人")
+    # 送信中に誰かがボタンを押していた場合 (DM の参照を保存する前だった) は、今の状態で描き直す
+    await db.refresh(call)
+    if call.status != "ringing" or json.loads(call.rejected_by or "[]"):
+        await _render(call)
     return "RINGING", call
 
 
