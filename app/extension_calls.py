@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -86,9 +87,22 @@ def format_phone(number: str) -> str:
     return number
 
 
+_BASE_URL_RE = re.compile(r"^https?://[A-Za-z0-9.-]+(:\d+)?(/[A-Za-z0-9._~/-]*)?$")
+
+
+def public_base_url() -> str:
+    """PUBLIC_BASE_URL が正しい URL のときだけ返す。プレースホルダーや全角文字が入っていれば空 (未設定扱い)。"""
+    base = settings.public_base_url.strip().rstrip("/")
+    if not base:
+        return ""
+    if not _BASE_URL_RE.match(base):
+        logger.warning(f"PUBLIC_BASE_URL が URL として不正なので無視します: {base!r}")
+        return ""
+    return base
+
+
 def join_url(call: ExtensionCall) -> str:
-    base = settings.public_base_url.rstrip("/")
-    return f"{base}/ext/join/{call.id}?t={call.join_secret}"
+    return f"{public_base_url()}/ext/join/{call.id}?t={call.join_secret}"
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +169,7 @@ def card_for(call: ExtensionCall, user_id: str) -> CallCard:
     if call.status == "accepted":
         if user_id == call.accepted_by:
             url = join_url(call)
-            if settings.public_base_url:
+            if public_base_url():
                 return CallCard(
                     title,
                     f"{head}\n✅ あなたが対応中です。下のボタンから通話に参加してください。",

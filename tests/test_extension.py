@@ -296,3 +296,28 @@ async def test_operator_can_list_extension_calls(client, ext_env):
     assert rows[0]["id"] == int(call_id)
     assert rows[0]["status"] == "ringing"
     assert rows[0]["extension"] == "101"
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("https://telauth.example.com", "https://telauth.example.com"),
+    ("https://telauth.example.com/", "https://telauth.example.com"),
+    ("http://localhost:8000", "http://localhost:8000"),
+    ("https://（通話ページを公開するURL）", ""),
+    ("telauth.example.com", ""),
+    ("", ""),
+])
+def test_public_base_url_validation(monkeypatch, raw, expected):
+    monkeypatch.setattr(settings, "public_base_url", raw)
+    assert svc.public_base_url() == expected
+
+
+async def test_join_page_ignores_placeholder_public_base_url(client, ext_env, monkeypatch):
+    monkeypatch.setattr(settings, "public_base_url", "https://（通話ページを公開するURL）")
+    _, call_id = (await _start(client)).split()
+    async with TestSessionLocal() as db:
+        call = await svc.accept(db, int(call_id), STAFF[0], "佐藤")
+    resp = await client.get(f"/ext/join/{call_id}", params={"t": call.join_secret}, headers={"host": "localhost:18000"})
+    assert '"wsUrl": "ws://localhost:18000/ws"' in resp.text
+    # DM 側もリンクボタンではなくパス表記になる
+    card = ext_env[0].latest_card(STAFF[0])
+    assert card.buttons == [] and "/ext/join/" in card.description

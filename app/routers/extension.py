@@ -155,16 +155,22 @@ _JOIN_PAGE = """<!doctype html>
       return;
     }
     setStatus("接続しています…");
-    const socket = new JsSIP.WebSocketInterface(cfg.wsUrl);
-    ua = new JsSIP.UA({
-      sockets: [socket],
-      uri: "sip:" + cfg.user + "@" + cfg.domain,
-      password: cfg.password,
-      display_name: cfg.displayName,
-      register: true,
-      register_expires: 120,
-      session_timers: false,
-    });
+    try {
+      const socket = new JsSIP.WebSocketInterface(cfg.wsUrl);
+      ua = new JsSIP.UA({
+        sockets: [socket],
+        uri: "sip:" + cfg.user + "@" + cfg.domain,
+        password: cfg.password,
+        display_name: cfg.displayName,
+        register: true,
+        register_expires: 120,
+        session_timers: false,
+      });
+    } catch (e) {
+      setStatus("接続設定に問題があります。管理者に連絡してください。", String(e));
+      answerBtn.disabled = false;
+      return;
+    }
     ua.on("registered", () => { setStatus("準備できました。まもなく電話がつながります…"); hangupBtn.style.display = "inline-block"; });
     ua.on("registrationFailed", (e) => setStatus("接続に失敗しました。", "registration: " + (e.cause || "")));
     ua.on("disconnected", () => { if (!session) setStatus("サーバーとの接続が切れました。ページを再読み込みしてください。"); });
@@ -199,7 +205,7 @@ _JOIN_PAGE = """<!doctype html>
 
 def _ws_url(request: Request) -> str:
     """ブラウザが使う WebSocket の URL。PUBLIC_BASE_URL があればそれを、無ければリクエスト元から組み立てる。"""
-    base = settings.public_base_url.rstrip("/")
+    base = svc.public_base_url()
     if not base:
         proto = request.headers.get("x-forwarded-proto", request.url.scheme)
         base = f"{proto}://{request.headers.get('host', request.url.netloc)}"
